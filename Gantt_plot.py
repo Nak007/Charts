@@ -38,7 +38,7 @@ for font_path in paths:
 
 __all__ = ["create_schedule", "gantt_plot", "workingdays"]
 
-def create_schedule(schedule, ref_date=None):
+def create_schedule(schedule, ref_date=None, holidays=None):
     
     '''
     Create schedule DataFrame.
@@ -56,8 +56,12 @@ def create_schedule(schedule, ref_date=None):
         completion  float64    
     
     ref_date : str, default=None
-        The reference date to be benchmarked against all tasks. If
+        The reference date to be benchmarked against all tasks. If 
         None, it defaults to today's date.
+        
+    holidays : array_like of datetime64[D], optional
+        An array of dates to consider as invalid dates. They may be 
+        specified in any order, and NaT (not-a-time) dates are ignored.
         
     Returns
     -------
@@ -73,6 +77,7 @@ def create_schedule(schedule, ref_date=None):
         start_num   int64           Starting index
         end_num     int64           Ending index
         duration    int64           Duration in day(s)
+        busday      int64           Number of business days
         prog_day    float64         Actual progress in day(s)
         exp_day     int64           Expected progress in day(s)
         plan        float64         Percent completion (expected)
@@ -98,6 +103,10 @@ def create_schedule(schedule, ref_date=None):
     X['end_num'] = (X["end"] - start_date).dt.days
     # Number of days between start and end of each task
     X['duration'] = X["end_num"] - X["start_num"]
+    # Number of business days
+    X['busday'] = [len(workingdays(X["start"][n], 
+                                   X["end"][n], holidays)) 
+                   for n in range(len(X))]
     # ---------------------------------------------------------------
     # Working days between start and current progression of each task
     X['prog_day'] = (X["duration"] * X["completion"])
@@ -138,7 +147,8 @@ def split_char(string, length, n_lines=2, suffix=" ..."):
 
 def gantt_plot(schedule, ax=None, ref_date=None ,colors=None, 
                intv_day=3, char_length=20, tight_layout=True, 
-               holidays=None, show_delta=False):
+               holidays=None, show_delta=False, show_vline=True, 
+               show_hline=True, show_days=True):
     
     '''
     Gantt Chart
@@ -180,6 +190,17 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     show_delta : boolean, default=None
         If True, it displays differences between acutal and expected
         progress of tasks, whose status is either "delay" or "on-time".
+        
+    show_vline : bool, default=True
+        If True, it displays minor gridlines on x-axis.
+    
+    show_hline : bool, default=True
+        If True, it display minor gridlines on y-axis.
+    
+    show_days : bool, default=True
+        If True, it displays a number of business days and duration
+        underneath percent completion e.g. (8/10).
+    
 
     Returns
     -------
@@ -227,15 +248,15 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
         elif  (sum(index)>0) & (s=="event"):
             kwds = dict(c=colors[i], zorder=2, marker="D", s=50)
             ax.scatter(X["start_num"][index], y[index], **kwds)
-            legend_kwds = dict(marker="D", markersize=5, 
-                               markerfacecolor=colors[i], 
-                               markeredgecolor="none",
-                               color='none')
-            sc = mpl.lines.Line2D([0],[0], **legend_kwds)
     # ---------------------------------------------------------------          
         labels += [s[0].upper() + s[1:] + 
                    " ({:,d})".format(sum(index))]
-        if s=="event": patches += [sc]
+        if s=="event": 
+            legend_kwds = dict(marker="D", markersize=5, 
+                               markerfacecolor=colors[-2], 
+                               markeredgecolor="none",
+                               color='none') 
+            patches += [mpl.lines.Line2D([0],[0], **legend_kwds)]
         else: patches += [Patch(facecolor=colors[i])]
     # ---------------------------------------------------------------
     # Facecolor
@@ -256,7 +277,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
 
     # Task, and % progress
     # ===============================================================
-    kwds = dict(textcoords='offset points', va="center", fontsize=12, 
+    kwds = dict(textcoords='offset points', va="center", fontsize=10.5, 
                 color="k", bbox=dict(boxstyle='round', facecolor="w", 
                                      pad=0.1, edgecolor="none"))
     r_text = {**kwds, **dict(ha="left" , xytext=(+3,0))}
@@ -268,9 +289,12 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
             if (X["status"][n]!="complete") & show_delta:
                 diff = X["diff_pct"][n]
                 if diff!=0:s += " ({:+,.0%})".format(diff)
+            if show_days:
+                a = (X["busday"][n], X["duration"][n])
+                s = "\n".join((s,"({:,d}/{:,d})".format(*a))) 
             ax.annotate(s,(X["end_num"][n],n), **r_text)
-            s = split_char(X["task"][n], char_length)
-            ax.annotate("\n".join(s), (X["start_num"][n],n),**l_text)
+            s = "\n".join(split_char(X["task"][n], char_length))
+            ax.annotate(s, (X["start_num"][n],n),**l_text)
         else: 
             s = split_char(X["task"][n], char_length)
             ax.annotate("\n".join(s), (X["start_num"][n],n),
@@ -326,10 +350,22 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
                     ,(ref_x, n_tasks-0.5), **kwds)
         labels += ["Reference date"]
         patches += [line]
-    # ==============================================================
+    # ---------------------------------------------------------------
+    # Show vertical lines
+    if show_vline:
+        for n in np.arange(*ax.get_xlim()):
+            ax.axvline(n, color="#bbbbbb", linestyle="--", lw=0.5, 
+                       zorder=-1)
+    # ---------------------------------------------------------------
+    # Show horizontal lines
+    if show_hline:
+        for n in np.arange(*ax.get_ylim())+1:
+            ax.axhline(n, color="#bbbbbb", linestyle="--", lw=0.5, 
+                       zorder=-1)
+    # ===============================================================
 
     # Legends
-    # ==============================================================
+    # ===============================================================
     legend = ax.legend(patches, labels, edgecolor="none", ncol=1,
                        borderaxespad=0.25, markerscale=1.5, 
                        columnspacing=0.3, labelspacing=0.7, 
