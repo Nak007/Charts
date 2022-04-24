@@ -2,6 +2,7 @@
 Available methods are the followings:
 [1] create_schedule
 [2] gantt_plot
+[3] workingdays
 
 Authors: Danusorn Sitdhirasdr <danusorn.si@gmail.com>
 versionadded:: 21-04-2022
@@ -35,7 +36,7 @@ for font_path in paths:
             break
         except:pass
 
-__all__ = ["create_schedule", "gantt_plot"]
+__all__ = ["create_schedule", "gantt_plot", "workingdays"]
 
 def create_schedule(schedule, ref_date=None):
     
@@ -45,7 +46,7 @@ def create_schedule(schedule, ref_date=None):
     Parameters
     ----------
     schedule : pd.DataFrame object
-        A Dataframe with the following columns:
+        A DataFrame with the following columns:
         
         Column      Dtype         
         ------      -----         
@@ -61,7 +62,7 @@ def create_schedule(schedule, ref_date=None):
     Returns
     -------
     X : pd.DataFrame object
-        A Dataframe with the following columns:
+        A DataFrame with the following columns:
    
         Column      Dtype           Description
         ------      -----           -----------
@@ -187,7 +188,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     '''
     # Initialize default parameters
     # ===============================================================
-    X = schedule.copy()
+    X = schedule.reset_index(drop=True).copy()
     n_tasks = len(X)
     start_date, end_date = X["start"].min(), X["end"].max()
     dates = pd.date_range(start_date, end=end_date)
@@ -339,3 +340,31 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     # ===============================================================
 
     return ax
+
+def workingdays(start, end, holidays=None):
+    
+    '''
+    Calculates which of the given dates are valid business days, and 
+    which are not.
+    
+    Parameters
+    ----------
+    start, end : datetime64[D] or str
+        Starting and ending dates e.g. "1999-12-25" (25th of December 
+        1999).
+    
+    holidays : array_like of datetime64[D], optional
+        An array of dates to consider as invalid dates. They may be 
+        specified in any order, and NaT (not-a-time) dates are ignored. 
+    
+    Returns
+    -------
+    busday : array_like of datetime64[D]
+        An array of valid business days.
+    
+    '''
+    dates = np.arange(start, end, dtype="datetime64[D]")
+    if holidays is None: holidays = np.r_[np.datetime64('nat')]
+    holidays = np.array(holidays, dtype="datetime64[D]")
+    busday = dates[np.is_busday(dates, holidays=holidays)]
+    return busday
