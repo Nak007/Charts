@@ -495,7 +495,7 @@ def get_workload(X, resources, holidays=None, hours=8):
     
     # Responsibility matrix
     resps = X[resources].values.copy() 
-    rescs = np.r_(resources).ravel()
+    rescs = np.r_[resources].ravel()
     
     # Validate `hours`
     if isinstance(hours, (int,float)):
