@@ -48,12 +48,12 @@ def create_schedule(schedule, ref_date=None, holidays=None):
     schedule : pd.DataFrame object
         A DataFrame with the following columns:
         
-        Column      Dtype         
-        ------      -----         
-        task        object        
-        start       datetime64[ns]
-        end         datetime64[ns]
-        completion  float64    
+        Column      Dtype           Description         
+        ------      -----           -----------    
+        task        object          Task name
+        start       datetime64[ns]  Starting date
+        end         datetime64[ns]  Ending date
+        completion  float64         Percent completion (actual)
     
     ref_date : str, default=None
         The reference date to be benchmarked against all tasks. If 
@@ -146,9 +146,10 @@ def split_char(string, length, n_lines=2, suffix=" ..."):
     return lines
 
 def gantt_plot(schedule, ax=None, ref_date=None ,colors=None, 
-               intv_day=3, char_length=20, tight_layout=True, 
-               holidays=None, show_delta=False, show_vline=True, 
-               show_hline=True, show_days=True):
+               major_locator=3, minor_locator=1, char_length=20, 
+               tight_layout=True, holidays=None, show_delta=False, 
+               show_vline=True, show_hline=True, show_days=True, 
+               start_date=None, end_date=None):
     
     '''
     Gantt Chart
@@ -159,10 +160,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
         An output from `create_schedule` function.
     
     ax : Matplotlib axis object, default=None
-        Predefined Matplotlib axis. If None, it uses default size, 
-        figsize=(max(len(dates)*0.3 + 1, 6), max(n_tasks*0.45, 4.5)), 
-        where `len(dates)` is a number of dates, and `n_tasks` is a
-        number of tasks.
+        Predefined Matplotlib axis. If None, it uses default size.
         
     ref_date : str, default=None
         The reference date to be benchmarked against all tasks. If
@@ -173,8 +171,12 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
         labels i.e. ["complete", "on-time", "delay", "event", 
         "holidays"]. If None, it uses default colors from Matplotlib.
         
-    intv_day : int, default=3
-        Interval of dates to be displayed. 
+    major_locator : int, default=3
+        A number of date intervals (major ticks) to be displayed on 
+        x-axis. 
+        
+    minor_locator : int, default=1
+        A number of intervals with minor ticks on x-axis.
         
     char_length : int, default=20
         A length of characters (task) to be displayed with in 2 lines.
@@ -201,7 +203,6 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
         If True, it displays a number of business days and duration
         underneath percent completion e.g. (8/10).
     
-
     Returns
     -------
     ax : Matplotlib axis object
@@ -211,17 +212,45 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     # ===============================================================
     X = schedule.reset_index(drop=True).copy()
     n_tasks = len(X)
-    start_date, end_date = X["start"].min(), X["end"].max()
-    dates = pd.date_range(start_date, end=end_date)
-    ax = plt.subplots(figsize=(max(len(dates)*0.3 + 1,6),
-                               max(n_tasks*0.45, 4.5)))[1]
+    # ---------------------------------------------------------------
+    # Convert to datetime64
+    X[["start","end"]] = X[["start", "end"]].apply(pd.to_datetime)
+    min_date, max_date = X["start"].min(), X["end"].max()
+    # ---------------------------------------------------------------
+    # Starting date
+    if start_date is None: start_date = X["start"].min()
+    start_date = max(Timestamp(start_date), min_date)
+    # --------------------------------------------------------------
+    # Ending date
+    if end_date is None: end_date = X["end"].max()
+    end_date = min(Timestamp(end_date), max_date)
+    # --------------------------------------------------------------
+    # Validate: end_date > start_date
+    if end_date <= start_date:
+        raise ValueError(f"`end_date` must be greater than" 
+                         f"`start_date`. Got `end_date` "
+                         f"({end_date.date()}) <= `start_date " 
+                         f"({start_date.date()}).")
+    # --------------------------------------------------------------
+    # Number of periods and date range.
+    dates = pd.date_range(min_date, max_date+np.timedelta64(1,'D'))
+    # Determine x_min, and x_max
+    indices = np.isin(dates, [start_date, end_date])
+    x_min, x_max = np.arange(len(dates))[indices]
+    # ---------------------------------------------------------------
+    # Default axis
+    if ax is None:
+        height = max(n_tasks*0.45, 4.5)
+        width  = max((x_max - x_min + 2)*0.3 + 1, 12)
+        ax = plt.subplots(figsize=(width, height))[1]
     # ---------------------------------------------------------------
     # Default of ref_date is today().
     if ref_date is None: ref_date = Timestamp(date.today())
     ref_date = Timestamp(ref_date)
     if colors is None:
         colors = ["#3498db","#2ecc71","#e74c3c","#2C3A47","#25CCF7"]
-    intv_day = max(1, intv_day)
+    major_locator = max(1, major_locator)
+    minor_locator = max(1, minor_locator)
     # ---------------------------------------------------------------
     if holidays is not None:
         # Convert string date to datetime64.
@@ -294,11 +323,13 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
                 s = "\n".join((s,"({:,d}/{:,d})".format(*a))) 
             ax.annotate(s,(X["end_num"][n],n), **r_text)
             s = "\n".join(split_char(X["task"][n], char_length))
-            ax.annotate(s, (X["start_num"][n],n),**l_text)
+            i = min(max(X["start_num"][n], x_min), x_max)
+            ax.annotate(s, (i,n),**l_text)
         else: 
             s = split_char(X["task"][n], char_length)
-            ax.annotate("\n".join(s), (X["start_num"][n],n),
-                          **{**l_text,**dict(xytext=(-10,0))})
+            i = min(max(X["start_num"][n], x_min), x_max)
+            ax.annotate("\n".join(s), (i,n),
+                        **{**l_text,**dict(xytext=(-10,0))})
     # ===============================================================    
 
     # Set other attributes
@@ -314,24 +345,27 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     ax.set_ylim(-0.5,max(y)+0.5)
     # ---------------------------------------------------------------
     # X-ticks
-    xticks = np.arange(0, len(dates), intv_day)
-    xticks_minor = np.arange(0, len(dates), 1)
+    xticks = np.arange(0, len(dates), major_locator)
+    xticks_minor = np.arange(0, len(dates), minor_locator)
     # ---------------------------------------------------------------
     ax.set_xticks(xticks)
     ax.set_xticks(xticks_minor, minor=True)
-    ax.set_xticklabels(dates.strftime("%d/%m")[::intv_day], color='k')
-    ax.set_xlim(-1, max(xticks_minor)+1)
+    ax.set_xticklabels(dates.strftime("%d/%m")[::major_locator], 
+                       color='k')
+    # ax.set_xlim(-1, max(xticks_minor)+1)
+    ax.set_xlim(x_min, x_max)
     # ===============================================================
 
     # Vertival spans & reference date
     # ===============================================================
     # Weekends
-    for n in xticks_minor[dates.dayofweek>=5]:
+    xticks = np.arange(0, len(dates), 1)
+    for n in xticks[dates.dayofweek>=5]:
         ax.axvspan(n, n+1, zorder=-1, facecolor="grey", 
                    edgecolor="none", alpha=0.1)
     # ---------------------------------------------------------------
     # Holidays
-    ref_x = xticks_minor[np.isin(dates, holidays)]
+    ref_x = xticks[np.isin(dates, holidays)]
     if len(ref_x)>0:
         for n in ref_x:
             ax.axvspan(n, n+1, zorder=-1, alpha=0.2, 
@@ -343,7 +377,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     # Reference date.
     kwds = dict(textcoords='offset points', va="bottom", ha="center", 
                 fontsize=13, xytext=(0,3), color="k", fontweight=600)
-    ref_x = xticks_minor[np.isin(dates, ref_date)]
+    ref_x = xticks[np.isin(dates, ref_date)]
     if len(ref_x)>0:
         line = ax.axvline(ref_x, zorder=-1, lw=1, c="grey", ls="--")
         ax.annotate(Timestamp(ref_date).strftime("%d/%m")
@@ -353,7 +387,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     # ---------------------------------------------------------------
     # Show vertical lines
     if show_vline:
-        for n in np.arange(*ax.get_xlim()):
+        for n in np.arange(*ax.get_xlim(), minor_locator):
             ax.axvline(n, color="#bbbbbb", linestyle="--", lw=0.5, 
                        zorder=-1)
     # ---------------------------------------------------------------
@@ -370,7 +404,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
                        borderaxespad=0.25, markerscale=1.5, 
                        columnspacing=0.3, labelspacing=0.7, 
                        handletextpad=0.5, prop=dict(size=12), 
-                       loc='center left') 
+                       loc='center left', facecolor="w") 
     legend.set_bbox_to_anchor([1.01, 0.5], transform = ax.transAxes)
     if tight_layout: plt.tight_layout()
     # ===============================================================
