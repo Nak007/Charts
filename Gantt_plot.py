@@ -3,6 +3,7 @@ Available methods are the followings:
 [1] create_schedule
 [2] gantt_plot
 [3] workingdays
+[4] get_workload
 
 Authors: Danusorn Sitdhirasdr <danusorn.si@gmail.com>
 versionadded:: 21-04-2022
@@ -36,7 +37,8 @@ for font_path in paths:
             break
         except:pass
 
-__all__ = ["create_schedule", "gantt_plot", "workingdays"]
+__all__ = ["create_schedule", "gantt_plot", 
+           "workingdays", "get_workload"]
 
 def create_schedule(schedule, ref_date=None, holidays=None):
     
@@ -59,7 +61,7 @@ def create_schedule(schedule, ref_date=None, holidays=None):
         The reference date to be benchmarked against all tasks. If 
         None, it defaults to today's date.
         
-    holidays : array_like of datetime64[D], optional
+    holidays : array of datetime64[D], default=None
         An array of dates to consider as invalid dates. They may be 
         specified in any order, and NaT (not-a-time) dates are ignored.
         
@@ -86,7 +88,6 @@ def create_schedule(schedule, ref_date=None, holidays=None):
         status      object          Task status
     
     '''
-    
     # ===============================================================
     X = pd.DataFrame(schedule).copy()
     # Default of ref_date is today().
@@ -185,7 +186,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
         If True, it adjusts the padding between and around subplots i.e. 
         plt.tight_layout().
         
-    holidays : list of str, default=None
+    holidays : list of str or array of datetime64[D], default=None
         A list of public or special holiday dates in `str` format i.e.
         ["2022-01-01"].
         
@@ -255,6 +256,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     if holidays is not None:
         # Convert string date to datetime64.
         holidays = pd.Series([Timestamp(t) for t in holidays])
+    else: holidays = np.array(holidays, dtype="datetime64[D]")
     # ===============================================================
 
     # Gantt chart
@@ -340,7 +342,6 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     ax.spines["right"].set_visible(False)
     ax.spines["top"].set_visible(False)
     ax.tick_params(axis='y', length=0)
-    ax.xaxis.set_major_locator(mpl.ticker.MaxNLocator(6))
     ax.tick_params(axis='both', labelsize=12)
     ax.set_ylim(-0.5,max(y)+0.5)
     # ---------------------------------------------------------------
@@ -423,7 +424,7 @@ def workingdays(start, end, holidays=None):
         Starting and ending dates e.g. "1999-12-25" (25th of December 
         1999).
     
-    holidays : array_like of datetime64[D], optional
+    holidays : array of datetime64[D], default=None
         An array of dates to consider as invalid dates. They may be 
         specified in any order, and NaT (not-a-time) dates are ignored. 
     
@@ -438,3 +439,90 @@ def workingdays(start, end, holidays=None):
     holidays = np.array(holidays, dtype="datetime64[D]")
     busday = dates[np.is_busday(dates, holidays=holidays)]
     return busday
+
+def get_workload(X, resources, holidays=None, hours=8):
+    
+    '''
+    Parameters
+    ----------
+    X : pd.DataFrame object
+        A DataFrame with the following columns:
+
+        Column      Dtype           Description
+        ------      -----           -----------    
+        task        object          Task name
+        start       datetime64[ns]  Starting date
+        end         datetime64[ns]  Ending date
+        n_hours     float64         Working hours/person
+        resources   int64           Responsible persons
+        
+    resources : list of str
+        List of numerical variables within `X` to be used as a 
+        resource matrix.
+        
+    holidays : array of datetime64[D], default=None
+        An array of dates to consider as invalid dates. They may be 
+        specified in any order, and NaT (not-a-time) dates are ignored.
+        
+    hours : float or 1D-array of shape (n_task,), default=8
+        If float, it is used as a fixed number of working hours per day,
+        otherwise array of working hours (float) must be provided.
+    
+    Returns
+    -------
+    workloads : dict
+        A dict of {"resource" : {"task": "number of working hours"}}
+
+    works : dict
+        A dict of {"resource": "number of works"}
+    
+    workhours : dict
+        A dict of {"resource": "Total number of working hours"}
+    
+    busdays : array of datetime64[D]
+        An array of business-day dates.
+    
+    '''
+    # Valid business days
+    busdays = workingdays(X["start"].min(), 
+                          X["end"].max(), holidays)
+    
+    # Initialize parameters
+    dtype = "datetime64[D]"
+    start = np.array(X["start"], dtype=dtype)
+    end   = np.array(X["end"]  , dtype=dtype)
+    tasks = X["task"].values.copy()
+    
+    # Responsibility matrix
+    resps = X[resources].values.copy() 
+    rescs = np.r_(resources).ravel()
+    
+    # Validate `hours`
+    if isinstance(hours, (int,float)):
+        hours = hours / X[resources].values.sum(axis=1)
+    elif not hasattr(hours, "__array__"):
+        raise ValueError("`hours` must be either a number "
+                         "or 1D-array")
+    else: hours = np.array(hours).ravel()
+        
+    workloads = dict([(r,{}) for r in rescs])
+    for n in range(len(tasks)):
+        
+        # Working hours given task
+        task = workingdays(start[n], end[n], holidays)
+        work = hours[n] * np.isin(busdays, task) 
+        
+        # Assign working hours to responsible person(s)
+        workforces = rescs[resps[n,:]==1]
+        if len(workforces) > 0:
+            for w in workforces:
+                workloads[w].update({tasks[n]:work})
+    
+    # Determine work amount & hour (`workloads`>0)
+    works, workhours = dict(), dict()
+    for key in workloads.keys():
+        v = np.r_[list(workloads[key].values())]
+        workhours.update({key:v.sum(0)})
+        works.update({key:(v>0).sum(0)})
+    
+    return workloads, works, workhours, busdays
