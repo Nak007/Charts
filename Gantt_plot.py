@@ -236,7 +236,8 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     # Number of periods and date range.
     dates = pd.date_range(min_date, max_date+np.timedelta64(1,'D'))
     # Determine x_min, and x_max
-    indices = np.isin(dates, [start_date, end_date])
+    sta_end = np.array([start_date, end_date],dtype='datetime64[ns]')
+    indices = np.isin(dates, sta_end)
     x_min, x_max = np.arange(len(dates))[indices]
     # ---------------------------------------------------------------
     # Default axis
