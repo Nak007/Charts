@@ -4,13 +4,14 @@ Available methods are the followings:
 [2] gantt_plot
 [3] workingdays
 [4] get_workload
+[5] PrintSchedules
 
 Authors: Danusorn Sitdhirasdr <danusorn.si@gmail.com>
-versionadded:: 21-04-2022
+versionadded:: 05-06-2023
 
 '''
-import pandas as pd, numpy as np, sys
-from pandas import Timestamp
+import pandas as pd, numpy as np, sys, os
+from openpyxl import load_workbook
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -20,6 +21,7 @@ from matplotlib.ticker import(FixedLocator,
                               FuncFormatter)
 from matplotlib.patches import Patch
 from datetime import date
+import datetime
 
 # Adding fonts
 from matplotlib import font_manager
@@ -37,8 +39,11 @@ for font_path in paths:
             break
         except:pass
 
-__all__ = ["create_schedule", "gantt_plot", 
-           "workingdays", "get_workload"]
+__all__ = ["create_schedule", 
+           "gantt_plot", 
+           "workingdays", 
+           "get_workload", 
+           "PrintSchedules"]
 
 def create_schedule(schedule, ref_date=None, holidays=None):
     
@@ -91,8 +96,8 @@ def create_schedule(schedule, ref_date=None, holidays=None):
     # ===============================================================
     X = pd.DataFrame(schedule).copy()
     # Default of ref_date is today().
-    if ref_date is None: ref_date = Timestamp(date.today())
-    ref_date = Timestamp(ref_date)
+    if ref_date is None: ref_date = pd.Timestamp(date.today())
+    ref_date = pd.Timestamp(ref_date)
     # ---------------------------------------------------------------
     # Starting and ending dates
     start_date = X["start"].min()
@@ -220,11 +225,11 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     # ---------------------------------------------------------------
     # Starting date
     if start_date is None: start_date = X["start"].min()
-    start_date = max(Timestamp(start_date), min_date)
+    start_date = max(pd.Timestamp(start_date), min_date)
     # --------------------------------------------------------------
     # Ending date
     if end_date is None: end_date = X["end"].max()
-    end_date = min(Timestamp(end_date), max_date)
+    end_date = min(pd.Timestamp(end_date), max_date)
     # --------------------------------------------------------------
     # Validate: end_date > start_date
     if end_date <= start_date:
@@ -236,27 +241,27 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     # Number of periods and date range.
     dates = pd.date_range(min_date, max_date+np.timedelta64(1,'D'))
     # Determine x_min, and x_max
-    sta_end = np.array([start_date, end_date],dtype='datetime64[ns]')
+    sta_end = np.array([start_date, end_date],dtype='datetime64[D]')
     indices = np.isin(dates, sta_end)
     x_min, x_max = np.arange(len(dates))[indices]
     # ---------------------------------------------------------------
     # Default axis
     if ax is None:
-        height = max(n_tasks*0.45, 4.5)
-        width  = max((x_max - x_min + 2)*0.3 + 1, 12)
+        height = max(n_tasks*0.62, 4.5)
+        width  = max((x_max - x_min + 2)*0.25, 12)
         ax = plt.subplots(figsize=(width, height))[1]
     # ---------------------------------------------------------------
     # Default of ref_date is today().
-    if ref_date is None: ref_date = Timestamp(date.today())
-    ref_date = Timestamp(ref_date)
+    if ref_date is None: ref_date = pd.Timestamp(date.today())
+    ref_date = pd.Timestamp(ref_date)
     if colors is None:
-        colors = ["#3498db","#2ecc71","#e74c3c","#2C3A47","#25CCF7"]
+        colors = ["#1B9CFC","#55E6C1","#FC427B","#82589F","#FEA47F"]
     major_locator = max(1, major_locator)
     minor_locator = max(1, minor_locator)
     # ---------------------------------------------------------------
     if holidays is not None:
         # Convert string date to datetime64.
-        holidays = pd.Series([Timestamp(t) for t in holidays])
+        holidays = pd.Series([pd.Timestamp(t) for t in holidays])
     else: holidays = np.array(holidays, dtype="datetime64[D]")
     # ===============================================================
 
@@ -314,7 +319,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
                                      pad=0.1, edgecolor="none"))
     r_text = {**kwds, **dict(ha="left" , xytext=(+3,0))}
     l_text = {**kwds, **dict(ha="right", xytext=(-3,0))}
-    # ---------------------------------------------------------------            
+    # ---------------------------------------------------------------
     for n in range(n_tasks):
         if X["status"][n]!="event":
             s = "{:.0%}".format( X["completion"][n])
@@ -354,7 +359,6 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     ax.set_xticks(xticks_minor, minor=True)
     ax.set_xticklabels(dates.strftime("%d/%m")[::major_locator], 
                        color='k')
-    # ax.set_xlim(-1, max(xticks_minor)+1)
     ax.set_xlim(x_min, x_max)
     # ===============================================================
 
@@ -379,10 +383,12 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
     # Reference date.
     kwds = dict(textcoords='offset points', va="bottom", ha="center", 
                 fontsize=13, xytext=(0,3), color="k", fontweight=600)
-    ref_x = xticks[np.isin(dates, ref_date)]
+    ref_x = xticks[np.isin(dates.astype(str),
+                           ref_date.strftime("%Y-%m-%d"))]
+    
     if len(ref_x)>0:
         line = ax.axvline(ref_x, zorder=-1, lw=1, c="grey", ls="--")
-        ax.annotate(Timestamp(ref_date).strftime("%d/%m")
+        ax.annotate(pd.Timestamp(ref_date).strftime("%d/%m")
                     ,(ref_x, n_tasks-0.5), **kwds)
         labels += ["Reference date"]
         patches += [line]
@@ -392,6 +398,7 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
         for n in np.arange(*ax.get_xlim(), minor_locator):
             ax.axvline(n, color="#bbbbbb", linestyle="--", lw=0.5, 
                        zorder=-1)
+    ax.set_xlim(x_min-0.5, x_max+0.5)
     # ---------------------------------------------------------------
     # Show horizontal lines
     if show_hline:
@@ -402,12 +409,12 @@ def gantt_plot(schedule, ax=None, ref_date=None ,colors=None,
 
     # Legends
     # ===============================================================
-    legend = ax.legend(patches, labels, edgecolor="none", ncol=1,
+    legend = ax.legend(patches, labels, edgecolor="none", ncol=7,
                        borderaxespad=0.25, markerscale=1.5, 
-                       columnspacing=0.3, labelspacing=0.7, 
+                       columnspacing=0.3, labelspacing=0.5, 
                        handletextpad=0.5, prop=dict(size=12), 
-                       loc='center left', facecolor="w") 
-    legend.set_bbox_to_anchor([1.01, 0.5], transform = ax.transAxes)
+                       loc='upper center', facecolor="w") 
+    legend.set_bbox_to_anchor([0.5, -0.10], transform = ax.transAxes)
     if tight_layout: plt.tight_layout()
     # ===============================================================
 
@@ -496,7 +503,7 @@ def get_workload(X, resources, holidays=None, hours=8):
     
     # Responsibility matrix
     resps = X[resources].values.copy() 
-    rescs = np.r_[resources].ravel()
+    rescs = np.r_(resources).ravel()
     
     # Validate `hours`
     if isinstance(hours, (int,float)):
@@ -527,3 +534,209 @@ def get_workload(X, resources, holidays=None, hours=8):
         works.update({key:(v>0).sum(0)})
     
     return workloads, works, workhours, busdays
+
+def read_workschedule(xls, completion=1., tasks=["Project"]):
+    
+    '''
+    Read schedule from excel file.
+    
+    Parameters
+    ----------
+    xls : Excel file (*.xls, *.xlsm) object
+        For any schedule sheet, it must contain the following columns:
+        
+        Column      Dtype           Description         
+        ------      -----           -----------    
+        task        object          Task name
+        start       datetime64[ns]  Starting date
+        end         datetime64[ns]  Ending date
+        completion  float64         Percent completion
+        type        object          Type of tasks ("schedule")
+    
+    completion : float, default=1.
+        Select task whose percent completion is less than "completion".
+        
+    tasks : str, or list of str, default=["Project"]
+        Select task whose task type matches "tasks".
+        
+    Returns
+    -------
+    data : dictionary
+    
+    tasks : dictionary
+        {'PROJECT01': 'Description 1',
+         'PROJECT02': 'Description 2'}
+         
+    members : dictionary
+        {'PROJECT01': 'Member1, Member2',
+         'PROJECT02': 'Member3', 
+         'PROJECT03': 'Member2, Member4'}
+    
+    '''
+    data = dict()
+    schedule, holidays, team = "Schedule", "PublicHolidays", "Team"
+    tasks = [tasks] if not isinstance(tasks, list) else tasks
+    
+    # Sheet name : 'schedule'
+    df = pd.read_excel(xls, sheet_name=schedule) 
+    df = df.drop(columns=["start_date", "days"]).fillna(0)
+    cond = df["type"].isin(tasks) & (df["completion"]<completion)
+    data[schedule] = df.loc[cond].reset_index(drop=True).to_dict()
+    
+    # Sheet name : 'PublicHolidays'
+    df = pd.read_excel(xls, sheet_name=holidays)
+    data[holidays] = df["Date"].values.astype("datetime64[D]")
+    
+    # Sheet name : 'Team'
+    df = pd.read_excel(xls, sheet_name=team)
+    data[team] = df["nickname"].values.astype("str")
+    
+    # Other sheets
+    for sh_name in data[schedule]["ref_id"].values():
+        try:
+            df = pd.read_excel(xls, sheet_name=sh_name)
+            data[sh_name] = df.to_dict()
+        except: pass
+    
+    # Tasks' decription
+    tasks = dict([(a,b) for a,b in 
+                  zip(data[schedule]["ref_id"].values(),
+                      data[schedule]["task"].values())])
+    
+    # Project owners (responsible personnel)
+    df = pd.DataFrame(data[schedule])
+    members = list(set(data[team]).intersection(df.columns))
+    owners = np.full(df[members].shape, members)
+    owners = np.where(df[members]==1, owners, "")
+    members = dict([(a,", ".join(b[b!=""])) for a,b in 
+                    zip(data[schedule]["ref_id"].values(),owners)])
+     
+    return data, tasks, members
+
+def get_subfolder(path=None):
+    
+    '''
+    Create folder (namely "Progress") and its subfolder, whose name 
+    is the current date in "%Y-%m-%d" format e.g. 2023-03-01.
+    
+    Parameters
+    ----------
+    path : str, default=None
+        A path-like object representing a file system path. If None,
+        it uses a current working directory i.e. os.getcwd().
+    
+    Returns
+    -------
+    path : Folder path
+    
+    '''
+    if path is None or os.path.isdir(path)==False:
+        path = os.getcwd() + "\\Progress"
+        if os.path.isdir(path)==False: os.mkdir(path)
+    subfolder = datetime.datetime.now().strftime("%Y-%m-%d")
+    path = f"{path}\\{subfolder}"
+    if os.path.isdir(path)==False: os.mkdir(path)
+    return path, subfolder
+
+def PrintSchedules(xls, completion=1., tasks=["Project"], n_days=15, 
+                   path=None, dpi=200, kwargs=None):
+    
+    '''
+    Print all schedules in `xls`. All images will be saved under
+    "\\Progress\\%Y-%m-%d" or "{path}\\%Y-%m-%d", where "%Y-%m-%d" 
+    represents a current date format e.g. 2023-03-01.
+    
+    Parameters
+    ----------
+    xls : Excel file (*.xls, *.xlsm) object
+        For any schedule sheet, it must contain the following columns:
+        
+        Column      Dtype           Description         
+        ------      -----           -----------    
+        task        object          Task name
+        start       datetime64[ns]  Starting date
+        end         datetime64[ns]  Ending date
+        completion  float64         Percent completion
+        type        object          Type of tasks ("schedule")
+    
+    completion : float, default=1.
+        Select task whose percent completion is less than "completion".
+        
+    tasks : str, or list of str, default=["Project"]
+        Select task whose task type matches "tasks".
+        
+    n_days : int, default=15
+        Number of days
+        
+    path : str, default=None
+        A path-like object representing a file system path. If None,
+        it uses a current working directory i.e. os.getcwd(). 
+    
+    dpi : float, default=200
+        The resolution in dots per inch.
+        
+    kwargs : dict, default=None
+        All keyword parameters supported by `gantt_plot`. Some
+        parameters will be changed and ignored.
+    
+    Returns
+    -------
+    path : str
+        A path that stores all saved images.
+        
+    '''
+    # Read data and create repository (folder)
+    data, tasks, members = read_workschedule(xls)
+    path, suffix = get_subfolder(path)
+    suffix = suffix.replace("-","")
+    kwargs = dict() if not isinstance(kwargs, dict) else kwargs
+
+    df = pd.DataFrame(data["Schedule"])
+    holidays = data["PublicHolidays"]
+    if len(df)==0: raise ValueError("No project found.")
+    df["task"] = df[["ref_id","task"]].apply(lambda x: ": ".join(x), axis=1)
+
+    ref_date = kwargs.get("ref_date", None)
+    ref_date = pd.Timestamp(date.today()) if ref_date is None else ref_date
+    S0 = ref_date - np.timedelta64(n_days, "D")
+    E0 = ref_date + np.timedelta64(n_days, "D")
+    S1 = df["start"].min()
+    E1 = df["end"].max()
+
+    # Determine starting and ending dates 
+    overlap = min((E0-S1).days, (E1-S0).days)<=0
+    start_date = min(S0, S1) if overlap else S0
+    end_date = max(E0, E1) if overlap else E0
+    kwargs.update({"ref_date" : ref_date, 
+                   "holidays" : holidays, 
+                   "start_date" : start_date, 
+                   "end_date" : end_date})
+    
+    # Create master schedule (input)
+    plt.ioff()
+    args = (df, ref_date, holidays)
+    X = create_schedule(*args).sort_values(by="start",ascending=False)
+    X.reset_index(drop=True, inplace=True)
+    ax = gantt_plot(X, **kwargs)
+    plt.gcf().suptitle("Master Schedule", fontsize=15)
+    plt.tight_layout()
+    plt.savefig(f"{path}\\masterschedule_{suffix}.png", dpi=dpi)
+    
+    # Other projects
+    _ = kwargs.pop("start_date")
+    _ = kwargs.pop("end_date")
+    projects = set(data.keys()).intersection(tasks.keys())
+    if len(projects) > 0:
+        for project in projects:
+            X = pd.DataFrame(data[project])   
+            X = create_schedule(X, ref_date, holidays)
+            X = X.sort_index(ascending=False).reset_index(drop=True)
+            ax = gantt_plot(X, **kwargs)
+            plt.gcf().suptitle(f"{project}: {tasks[project]}\n"
+                               f"Owners : {members[project]}", 
+                               fontsize=15)
+            plt.tight_layout()
+            plt.savefig(f"{path}\\{project}_{suffix}.png", dpi=dpi)
+    plt.ion()
+    
+    return path
